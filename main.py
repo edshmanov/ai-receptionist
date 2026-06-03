@@ -13,10 +13,17 @@ def webhook():
     if not data:
         return "ok", 200
     
-    transcript = data.get("message", {}).get("transcript", "No transcript")
-    caller = data.get("message", {}).get("customer", {}).get("number", "Unknown")
+    message = data.get("message", {})
+    event_type = message.get("type", "")
     
-    text = f"📞 New Lead!\n\nPhone: {caller}\n\nConversation:\n{transcript}"
+    if event_type != "end-of-call-report":
+        return "ok", 200
+    
+    transcript = message.get("transcript", "No transcript")
+    caller = message.get("customer", {}).get("number", "Unknown")
+    duration = round(message.get("durationSeconds", 0))
+    
+    text = f"📞 New Lead!\n\nPhone: {caller}\nDuration: {duration} sec\n\nConversation:\n{transcript}"
     
     requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
