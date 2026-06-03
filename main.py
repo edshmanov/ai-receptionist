@@ -16,7 +16,7 @@ def webhook():
     transcript = data.get("message", {}).get("transcript", "No transcript")
     caller = data.get("message", {}).get("customer", {}).get("number", "Unknown")
     
-    text = f"📞 Новая заявка!\n\nТелефон: {caller}\n\nРазговор:\n{transcript}"
+    text = f"📞 New Lead!\n\nPhone: {caller}\n\nConversation:\n{transcript}"
     
     requests.post(
         f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
