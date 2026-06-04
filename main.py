@@ -1,37 +1,43 @@
 from flask import Flask, request
 import requests
 import os
-import re
+import json
 
 app = Flask(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 
-def extract_info(transcript):
-    name = "Not provided"
-    phone = "Not provided"
-    address = "Not provided"
-    service = "Not provided"
-    time = "Not provided"
+def extract_info_with_ai(transcript):
+    response = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": ANTHROPIC_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        },
+        json={
+            "model": "claude-haiku-4-5",
+            "max_tokens": 500,
+            "messages": [{
+                "role": "user",
+                "content": f"""Extract the following info from this call transcript and return ONLY valid JSON, nothing else:
+{{
+  "name": "full name or Not provided",
+  "address": "full address or Not provided", 
+  "service": "what service they need in one sentence",
+  "appointment_time": "requested date and time or Not provided"
+}}
 
-    lines = transcript.split("\n")
-    for i, line in enumerate(lines):
-        l = line.lower()
-        if "name" in l and "user:" in line.lower():
-            name = line.split(":", 1)[-1].strip()
-        if any(x in l for x in ["address", "zip", "street"]) and "user:" in line.lower():
-            address = line.split(":", 1)[-1].strip()
-        if any(x in l for x in ["tomorrow", "monday","tuesday","wednesday","thursday","friday","saturday","sunday","am","pm","morning","afternoon","evening"]) and "user:" in line.lower():
-            time = line.split(":", 1)[-1].strip()
-        if any(x in l for x in ["pipe","plumb","leak","roof","electric","repair","fix","install","handyman"]) and "user:" in line.lower():
-            service = line.split(":", 1)[-1].strip()
-
-    phones = re.findall(r'\+?[\d\s\-\(\)]{10,}', transcript)
-    if phones:
-        phone = phones[0].strip()
-
-    return name, phone, address, service, time
+Transcript:
+{transcript}"""
+            }]
+        }
+    )
+    result = response.json()
+    text = result["content"][0]["text"]
+    return json.loads(text)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -49,17 +55,20 @@ def webhook():
     caller = message.get("customer", {}).get("number", "Unknown")
     duration = round(message.get("durationSeconds", 0))
 
-    name, phone, address, service, appt_time = extract_info(transcript)
+    try:
+        info = extract_info_with_ai(transcript)
+    except:
+        info = {"name": "Unknown", "address": "Not provided", "service": "Not provided", "appointment_time": "Not provided"}
 
     text = (
         f"📞 New Lead!\n"
         f"━━━━━━━━━━━━━━━\n"
-        f"👤 Name: {name}\n"
+        f"👤 Name: {info.get('name')}\n"
         f"📱 Phone: {caller}\n"
-        f"📍 Address: {address}\n"
-        f"🔧 Service: {service}\n"
-        f"📅 Time: {appt_time}\n"
-        f"⏱ Call duration: {duration} sec\n"
+        f"📍 Address: {info.get('address')}\n"
+        f"🔧 Service: {info.get('service')}\n"
+        f"📅 Time: {info.get('appointment_time')}\n"
+        f"⏱ Duration: {duration} sec\n"
         f"━━━━━━━━━━━━━━━"
     )
 
@@ -69,5 +78,4 @@ def webhook():
     )
     return "ok", 200
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+if __name__
