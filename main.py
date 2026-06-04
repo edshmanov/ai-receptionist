@@ -1,7 +1,6 @@
 from flask import Flask, request
 import requests
 import os
-import json
 
 app = Flask(__name__)
 
@@ -24,16 +23,20 @@ def extract_info(transcript):
             "messages": [{
                 "role": "user",
                 "content": (
-                    "Extract info from this call transcript. "
-                    "Return ONLY JSON, no other text:\n"
-                    '{"name":"...","address":"...","service":"...","time":"..."}\n\n'
-                    + transcript
+                    "Extract info from this call transcript.\n"
+                    "Return ONLY this JSON format, no markdown, no explanation:\n"
+                    "{\"name\":\"value\",\"address\":\"value\",\"service\":\"value\",\"time\":\"value\"}\n\n"
+                    "Use 'Not provided' if info is missing.\n\n"
+                    "Transcript:\n" + transcript
                 )
             }]
-        }
+        },
+        timeout=15
     )
-    text = resp.json()["content"][0]["text"]
-    return json.loads(text)
+    import json
+    raw = resp.json()["content"][0]["text"].strip()
+    raw = raw.replace("```json", "").replace("```", "").strip()
+    return json.loads(raw)
 
 
 @app.route("/webhook", methods=["POST"])
@@ -46,10 +49,9 @@ def webhook():
         return "ok", 200
     transcript = msg.get("transcript", "")
     caller = msg.get("customer", {}).get("number", "Unknown")
-    duration = round(msg.get("durationSeconds", 0))
     try:
         info = extract_info(transcript)
-    except Exception:
+    except Exception as e:
         info = {"name": "?", "address": "?", "service": "?", "time": "?"}
     text = (
         f"📞 New Lead!\n"
@@ -59,7 +61,6 @@ def webhook():
         f"📍 Address: {info.get('address','?')}\n"
         f"🔧 Service: {info.get('service','?')}\n"
         f"📅 Time: {info.get('time','?')}\n"
-        f"⏱ Duration: {duration} sec\n"
         f"━━━━━━━━━━━━━━━"
     )
     requests.post(
