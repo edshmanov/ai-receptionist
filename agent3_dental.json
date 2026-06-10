@@ -1,0 +1,15 @@
+{
+  "name": "CallMind - Dental Demo",
+  "assistant_name": "Sophie",
+  "id": "8a38cc13-087f-4161-af22-3a298cb8ebd0",
+  "type": "inbound",
+  "model": {
+    "provider": "anthropic",
+    "model": "claude-haiku-4-5"
+  },
+  "voice": "Sophie",
+  "language": "en",
+  "target_niche": "Dental clinics",
+  "webhookUrl": "https://ai-receptionist-production-805b.up.railway.app/webhook",
+  "description": "Inbound AI receptionist for dental clinics. Answers calls 24/7, schedules appointments, collects patient info and sends leads to Telegram."
+}
