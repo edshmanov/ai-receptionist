@@ -1,0 +1,15 @@
+{
+  "name": "CallMind - Auto Demo",
+  "assistant_name": "Jake",
+  "id": "ca89213b-7b92-43a6-a64b-e4748617f3ec",
+  "type": "inbound",
+  "model": {
+    "provider": "anthropic",
+    "model": "claude-haiku-4-5"
+  },
+  "voice": "Jake",
+  "language": "en",
+  "target_niche": "Auto dealerships",
+  "webhookUrl": "https://ai-receptionist-production-805b.up.railway.app/webhook",
+  "description": "Inbound AI receptionist for auto dealerships. Answers calls 24/7, qualifies buyers, schedules test drives and sends leads to Telegram."
+}
