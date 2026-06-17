@@ -19,7 +19,15 @@ def webhook():
         if msg.get("type") != "end-of-call-report":
             return "ok", 200
 
-        caller = msg.get("customer", {}).get("number", "Unknown")
+        # Телефон — ищем во всех возможных местах
+        caller = (
+            msg.get("customer", {}).get("number") or
+            msg.get("call", {}).get("customer", {}).get("number") or
+            data.get("customer", {}).get("number") or
+            data.get("call", {}).get("customer", {}).get("number") or
+            "Unknown"
+        )
+
         summary = msg.get("summary", "")
         transcript = msg.get("transcript", "")
 
@@ -33,7 +41,7 @@ def webhook():
             name = name_match.group(1).strip()
 
         # Машина
-        car = "Unknown"
+        car = "Not mentioned"
         car_match = re.search(
             r"(\d{4})\s+(BMW|Toyota|Audi|Honda|Ford|Chevrolet|Mercedes|Lexus|Nissan|Hyundai|Kia|Volkswagen|VW|Subaru|Mazda|Dodge|Ram|Jeep|GMC|Cadillac|Infiniti|Acura|Volvo|Porsche|Land Rover|Range Rover|Tesla)[^\n,\.]{0,30}",
             transcript, re.I
@@ -57,8 +65,8 @@ def webhook():
         if time_match:
             time_pref = time_match.group(1).strip()
 
-        # Проблема — берём из summary
-        problem = summary if summary else "See transcript"
+        # Проблема
+        problem = summary if summary else transcript[:500] if transcript else "No info"
 
         text = (
             f"🔧 Новая заявка — Auto House UA\n"
