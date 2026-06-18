@@ -19,7 +19,6 @@ def webhook():
         if msg.get("type") != "end-of-call-report":
             return "ok", 200
 
-        # Телефон — ищем во всех возможных местах
         caller = (
             msg.get("customer", {}).get("number") or
             msg.get("call", {}).get("customer", {}).get("number") or
@@ -65,8 +64,21 @@ def webhook():
         if time_match:
             time_pref = time_match.group(1).strip()
 
-        # Проблема
-        problem = summary if summary else transcript[:500] if transcript else "No info"
+        # Проблема — вытаскиваем только реплики клиента (User)
+        if summary:
+            problem = summary
+        else:
+            user_lines = []
+            for line in transcript.split("\n"):
+                line = line.strip()
+                if line.lower().startswith("user:"):
+                    text = line.split(":", 1)[1].strip()
+                    if text:
+                        user_lines.append(text)
+            if user_lines:
+                problem = " ".join(user_lines)[:600]
+            else:
+                problem = "Клиент не назвал проблему"
 
         text = (
             f"🔧 Новая заявка — Auto House UA\n"
@@ -77,7 +89,7 @@ def webhook():
             f"📍 Локейшн: {location}\n"
             f"📅 Время: {time_pref}\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"💬 Проблема:\n{problem}\n"
+            f"💬 Что нужно клиенту:\n{problem}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"📲 CallMind AI"
         )
