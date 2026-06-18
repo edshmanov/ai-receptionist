@@ -35,45 +35,48 @@ def webhook():
         )
 
         transcript = msg.get("transcript", "")
+        full = transcript.replace("\n", " ")
         u = user_text(transcript)
 
-        # Имя: ищем разные формы
+        brands = "BMW|Porsche|Mercedes|Toyota|Audi|Honda|Ford|Chevrolet|Chevy|Lexus|Nissan|Hyundai|Kia|Volkswagen|VW|Subaru|Mazda|Dodge|Ram|Jeep|GMC|Cadillac|Infiniti|Acura|Volvo|Tesla|Land Rover|Range Rover"
+
+        # Имя
         name = "Не указано"
         m = re.search(r"(?:my name is|i am|i'm|this is|name is|it's|меня зовут)\s+([A-Za-zА-Яа-я]+(?:\s+[A-Za-zА-Яа-я]+)?)", u, re.I)
-        if not m:
-            # имя как ответ из 1-2 слов с заглавных, без цифр и служебных слов
-            m = re.search(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", u)
-            if m and m.group(1).lower() in ("arlington","schaumburg","friday","monday","tuesday","wednesday","thursday","saturday","porsche","bmw","mercedes","toyota","audi","honda"):
-                m = None
         if m:
             name = m.group(1).strip().title()
 
-        # Машина: год+марка ИЛИ просто марка
+        # Машина: сначала год+марка в любом месте, потом марка одна
         car = "Не указано"
-        brands = "BMW|Porsche|Mercedes|Toyota|Audi|Honda|Ford|Chevrolet|Lexus|Nissan|Hyundai|Kia|Volkswagen|VW|Subaru|Mazda|Dodge|Ram|Jeep|GMC|Cadillac|Infiniti|Acura|Volvo|Tesla|Land Rover|Range Rover"
-        m = re.search(r"(\d{4})\s+(" + brands + r")([A-Za-z0-9 ]{0,15})", u, re.I)
+        m = re.search(r"(\d{4})\s+(" + brands + r")([A-Za-z0-9\- ]{0,18})", full, re.I)
         if m:
             car = (m.group(1) + " " + m.group(2) + m.group(3)).strip()
         else:
-            m = re.search(r"(" + brands + r")([A-Za-z0-9 ]{0,15})", u, re.I)
+            m = re.search(r"(" + brands + r")([A-Za-z0-9\- ]{0,18})", full, re.I)
             if m:
                 car = (m.group(1) + m.group(2)).strip()
 
+        # Телефон
         phone = caller if caller and caller != "Unknown" else "Не указано"
 
+        # Локейшн
         location = "Не указано"
-        if "arlington" in u.lower():
+        if "arlington" in full.lower():
             location = "Arlington Heights"
-        elif "schaumburg" in u.lower():
+        elif "schaumburg" in full.lower():
             location = "Schaumburg"
 
+        # Время: день + до 30 символов + am/pm, иначе только день
         time_pref = "Не указано"
-        m = re.search(r"((?:monday|tuesday|wednesday|thursday|friday|saturday|tomorrow)[A-Za-z0-9 :]{0,20}(?:am|pm)?)", u, re.I)
+        m = re.search(r"((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)[A-Za-z0-9 ,:'\.]{0,30}(?:am|pm))", full, re.I)
+        if not m:
+            m = re.search(r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)", full, re.I)
         if m:
-            time_pref = m.group(1).strip()
+            time_pref = re.sub(r"\s+", " ", m.group(1)).strip()
 
+        # Проблема: ключевые слова из реплик клиента
         problem = "Не указано"
-        pm = re.search(r"(brake[s]?|engine|transmission|oil|noise|check engine|battery|tire[s]?|suspension|coolant|leak|ac|air condition|diagnos[a-z]*|tuning|light[s]?)[A-Za-z ,]{0,40}", u, re.I)
+        pm = re.search(r"(brake[s]?|engine|transmission|oil|noise|check engine|battery|tire[s]?|suspension|coolant|leak|a/?c|air condition[a-z]*|diagnos[a-z]*|tuning|light[s]?|won'?t start|not starting)[A-Za-z ,]{0,40}", u, re.I)
         if pm:
             problem = pm.group(0).strip()
         elif u:
