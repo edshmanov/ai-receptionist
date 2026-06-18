@@ -7,15 +7,28 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-def user_text(transcript):
-    lines = []
-    for line in transcript.split("\n"):
-        line = line.strip()
-        if line.lower().startswith("user:"):
-            t = line.split(":", 1)[1].strip()
-            if t:
-                lines.append(t)
-    return " ".join(lines)
+BAD = ("", "none", "n/a", "null", "unknown", "не указано", "alex", "auto house ua", "autohouse ua")
+
+def norm(k):
+    return re.sub(r"[^a-z]", "", str(k).lower())
+
+def deep_find(obj, keys):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            if norm(k) in keys and isinstance(v, (str, int, float)):
+                s = str(v).strip()
+                if s.lower() not in BAD:
+                    return s
+        for v in obj.values():
+            r = deep_find(v, keys)
+            if r:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = deep_find(v, keys)
+            if r:
+                return r
+    return None
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -34,53 +47,28 @@ def webhook():
             "Unknown"
         )
 
-        transcript = msg.get("transcript", "")
-        full = transcript.replace("\n", " ")
-        u = user_text(transcript)
+        name = deep_find(data, {"customername", "callername", "clientname", "fullname"}) or "Не указано"
+        car = deep_find(data, {"vehicle", "car", "vehicleinfo", "carmodel"}) or "Не указано"
+        location = deep_find(data, {"location", "shoplocation", "preferredlocation"}) or "Не указано"
+        time_pref = deep_find(data, {"appointmenttime", "preferredtime", "appointmentdatetime"}) or "Не указано"
+        problem = deep_find(data, {"problem", "issue", "concern", "servicereason"}) or "Не указано"
 
-        brands = "BMW|Porsche|Mercedes|Toyota|Audi|Honda|Ford|Chevrolet|Chevy|Lexus|Nissan|Hyundai|Kia|Volkswagen|VW|Subaru|Mazda|Dodge|Ram|Jeep|GMC|Cadillac|Infiniti|Acura|Volvo|Tesla|Land Rover|Range Rover"
+        phone = deep_find(data, {"phonenumber", "callbacknumber", "customerphone"})
+        if caller and caller != "Unknown":
+            phone = caller
+        if not phone:
+            phone = "Не указано"
 
-        # Имя
-        name = "Не указано"
-        m = re.search(r"(?:my name is|i am|i'm|this is|name is|it's|меня зовут)\s+([A-Za-zА-Яа-я]+(?:\s+[A-Za-zА-Яа-я]+)?)", u, re.I)
-        if m:
-            name = m.group(1).strip().title()
-
-        # Машина: сначала год+марка в любом месте, потом марка одна
-        car = "Не указано"
-        m = re.search(r"(\d{4})\s+(" + brands + r")([A-Za-z0-9\- ]{0,18})", full, re.I)
-        if m:
-            car = (m.group(1) + " " + m.group(2) + m.group(3)).strip()
-        else:
-            m = re.search(r"(" + brands + r")([A-Za-z0-9\- ]{0,18})", full, re.I)
-            if m:
-                car = (m.group(1) + m.group(2)).strip()
-
-        # Телефон
-        phone = caller if caller and caller != "Unknown" else "Не указано"
-
-        # Локейшн
-        location = "Не указано"
-        if "arlington" in full.lower():
-            location = "Arlington Heights"
-        elif "schaumburg" in full.lower():
-            location = "Schaumburg"
-
-        # Время: день + до 30 символов + am/pm, иначе только день
-        time_pref = "Не указано"
-        m = re.search(r"((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)[A-Za-z0-9 ,:'\.]{0,30}(?:am|pm))", full, re.I)
-        if not m:
-            m = re.search(r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)", full, re.I)
-        if m:
-            time_pref = re.sub(r"\s+", " ", m.group(1)).strip()
-
-        # Проблема: ключевые слова из реплик клиента
-        problem = "Не указано"
-        pm = re.search(r"(brake[s]?|engine|transmission|oil|noise|check engine|battery|tire[s]?|suspension|coolant|leak|a/?c|air condition[a-z]*|diagnos[a-z]*|tuning|light[s]?|won'?t start|not starting)[A-Za-z ,]{0,40}", u, re.I)
-        if pm:
-            problem = pm.group(0).strip()
-        elif u:
-            problem = u[:120]
+        # Подстраховка для проблемы — первая фраза клиента
+        if problem == "Не указано":
+            transcript = msg.get("transcript", "")
+            for line in transcript.split("\n"):
+                line = line.strip()
+                if line.lower().startswith("user:"):
+                    t = line.split(":", 1)[1].strip()
+                    if t:
+                        problem = t[:120]
+                        break
 
         text = (
             f"🔧 Новая заявка — Auto House UA\n"
