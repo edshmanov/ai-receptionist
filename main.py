@@ -1,34 +1,37 @@
 from flask import Flask, request
 import requests
 import os
-import re
+import json
 
 app = Flask(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-BAD = ("", "none", "n/a", "null", "unknown", "не указано", "alex", "auto house ua", "autohouse ua")
+BAD = ("", "none", "n/a", "null", "unknown", "не указано", "true", "false",
+       "alex", "auto house ua", "autohouse ua")
 
 def norm(k):
-    return re.sub(r"[^a-z]", "", str(k).lower())
+    return "".join(c for c in str(k).lower() if c.isalpha())
 
-def deep_find(obj, keys):
+def walk(obj, flat):
     if isinstance(obj, dict):
+        low = {k.lower(): k for k in obj if isinstance(k, str)}
+        name_key = next((low[k] for k in ("name", "title", "key", "label") if k in low), None)
+        val_key = next((low[k] for k in ("result", "value", "output") if k in low), None)
+        if name_key and val_key and isinstance(obj.get(val_key), (str, int, float)):
+            v = str(obj[val_key]).strip()
+            if v.lower() not in BAD:
+                flat[norm(obj[name_key])] = v
         for k, v in obj.items():
-            if norm(k) in keys and isinstance(v, (str, int, float)):
+            if isinstance(v, (str, int, float)):
                 s = str(v).strip()
-                if s.lower() not in BAD:
-                    return s
-        for v in obj.values():
-            r = deep_find(v, keys)
-            if r:
-                return r
+                if norm(k) not in flat and s.lower() not in BAD:
+                    flat[norm(k)] = s
+            else:
+                walk(v, flat)
     elif isinstance(obj, list):
         for v in obj:
-            r = deep_find(v, keys)
-            if r:
-                return r
-    return None
+            walk(v, flat)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -47,20 +50,24 @@ def webhook():
             "Unknown"
         )
 
-        name = deep_find(data, {"customername", "callername", "clientname", "fullname"}) or "Не указано"
-        car = deep_find(data, {"vehicle", "car", "vehicleinfo", "carmodel"}) or "Не указано"
-        location = deep_find(data, {"location", "shoplocation", "preferredlocation"}) or "Не указано"
-        time_pref = deep_find(data, {"appointmenttime", "preferredtime", "appointmentdatetime"}) or "Не указано"
-        problem = deep_find(data, {"problem", "issue", "concern", "servicereason"}) or "Не указано"
+        flat = {}
+        walk(data, flat)
 
-        phone = deep_find(data, {"phonenumber", "callbacknumber", "customerphone"})
-        if caller and caller != "Unknown":
-            phone = caller
-        if not phone:
-            phone = "Не указано"
+        def pick(*cands):
+            for c in cands:
+                if c in flat and flat[c].lower() not in BAD:
+                    return flat[c]
+            return None
 
-        # Подстраховка для проблемы — первая фраза клиента
-        if problem == "Не указано":
+        name = pick("customername", "callername", "clientname", "fullname")
+        car = pick("vehicle", "vehicletwo", "car", "carmodel", "vehicleinfo")
+        location = pick("location", "shoplocation", "preferredlocation")
+        time_pref = pick("appointmenttime", "preferredtime", "appointmentdatetime")
+        problem = pick("problem", "issue", "concern", "servicereason")
+
+        phone = caller if caller and caller != "Unknown" else (pick("phonenumber", "callbacknumber") or "Не указано")
+
+        if not problem:
             transcript = msg.get("transcript", "")
             for line in transcript.split("\n"):
                 line = line.strip()
@@ -70,16 +77,19 @@ def webhook():
                         problem = t[:120]
                         break
 
+        def show(v):
+            return v if v else "Не указано"
+
         text = (
             f"🔧 Новая заявка — Auto House UA\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"👤 Имя: {name}\n"
-            f"📱 Телефон: {phone}\n"
-            f"🚗 Авто: {car}\n"
-            f"📍 Локейшн: {location}\n"
-            f"📅 Время: {time_pref}\n"
+            f"👤 Имя: {show(name)}\n"
+            f"📱 Телефон: {show(phone)}\n"
+            f"🚗 Авто: {show(car)}\n"
+            f"📍 Локейшн: {show(location)}\n"
+            f"📅 Время: {show(time_pref)}\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"💬 Проблема: {problem}\n"
+            f"💬 Проблема: {show(problem)}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"📲 CallMind AI"
         )
@@ -88,6 +98,16 @@ def webhook():
             f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
             json={"chat_id": TELEGRAM_CHAT_ID, "text": text[:4000]}
         )
+
+        # Временный отладочный вывод — сработает только если поля пустые
+        if not (name and car and location and time_pref):
+            analysis = msg.get("analysis", {})
+            dump = json.dumps(analysis, ensure_ascii=False)[:1500]
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                json={"chat_id": TELEGRAM_CHAT_ID, "text": "🔍 DEBUG analysis:\n" + dump}
+            )
+
     except Exception as e:
         print(f"Error: {e}")
     return "ok", 200
