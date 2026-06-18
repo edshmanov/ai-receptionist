@@ -37,35 +37,41 @@ def webhook():
         transcript = msg.get("transcript", "")
         u = user_text(transcript)
 
-        # Имя
+        # Имя: ищем разные формы
         name = "Не указано"
-        m = re.search(r"(?:my name is|i am|i'm|this is|name is|меня зовут)\s+([A-Za-zА-Яа-я]+(?:\s+[A-Za-zА-Яа-я]+)?)", u, re.I)
+        m = re.search(r"(?:my name is|i am|i'm|this is|name is|it's|меня зовут)\s+([A-Za-zА-Яа-я]+(?:\s+[A-Za-zА-Яа-я]+)?)", u, re.I)
+        if not m:
+            # имя как ответ из 1-2 слов с заглавных, без цифр и служебных слов
+            m = re.search(r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b", u)
+            if m and m.group(1).lower() in ("arlington","schaumburg","friday","monday","tuesday","wednesday","thursday","saturday","porsche","bmw","mercedes","toyota","audi","honda"):
+                m = None
         if m:
             name = m.group(1).strip().title()
 
-        # Машина
+        # Машина: год+марка ИЛИ просто марка
         car = "Не указано"
-        m = re.search(r"(\d{4})\s+(BMW|Porsche|Mercedes|Toyota|Audi|Honda|Ford|Chevrolet|Lexus|Nissan|Hyundai|Kia|Volkswagen|VW|Subaru|Mazda|Dodge|Ram|Jeep|GMC|Cadillac|Infiniti|Acura|Volvo|Tesla|Land Rover|Range Rover)([A-Za-z0-9 ]{0,15})", u, re.I)
+        brands = "BMW|Porsche|Mercedes|Toyota|Audi|Honda|Ford|Chevrolet|Lexus|Nissan|Hyundai|Kia|Volkswagen|VW|Subaru|Mazda|Dodge|Ram|Jeep|GMC|Cadillac|Infiniti|Acura|Volvo|Tesla|Land Rover|Range Rover"
+        m = re.search(r"(\d{4})\s+(" + brands + r")([A-Za-z0-9 ]{0,15})", u, re.I)
         if m:
             car = (m.group(1) + " " + m.group(2) + m.group(3)).strip()
+        else:
+            m = re.search(r"(" + brands + r")([A-Za-z0-9 ]{0,15})", u, re.I)
+            if m:
+                car = (m.group(1) + m.group(2)).strip()
 
-        # Телефон из звонка
         phone = caller if caller and caller != "Unknown" else "Не указано"
 
-        # Локейшн
         location = "Не указано"
         if "arlington" in u.lower():
             location = "Arlington Heights"
         elif "schaumburg" in u.lower():
             location = "Schaumburg"
 
-        # Время
         time_pref = "Не указано"
         m = re.search(r"((?:monday|tuesday|wednesday|thursday|friday|saturday|tomorrow)[A-Za-z0-9 :]{0,20}(?:am|pm)?)", u, re.I)
         if m:
             time_pref = m.group(1).strip()
 
-        # Проблема — ключевые слова
         problem = "Не указано"
         pm = re.search(r"(brake[s]?|engine|transmission|oil|noise|check engine|battery|tire[s]?|suspension|coolant|leak|ac|air condition|diagnos[a-z]*|tuning|light[s]?)[A-Za-z ,]{0,40}", u, re.I)
         if pm:
