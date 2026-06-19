@@ -1,21 +1,36 @@
 from flask import Flask, request
 import requests
 import os
-import re
 
 app = Flask(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-def user_text(transcript):
-    lines = []
-    for line in transcript.split("\n"):
-        line = line.strip()
-        if line.lower().startswith("user:"):
-            t = line.split(":", 1)[1].strip()
-            if t:
-                lines.append(t)
-    return " ".join(lines)
+BAD = ("", "none", "n/a", "null", "unknown", "не указано", "true", "false")
+
+def norm(k):
+    return "".join(c for c in str(k).lower() if c.isalpha() or c == "_").replace("_", "")
+
+def collect(obj, flat):
+    """Рекурсивно собираем все пары имя→значение, включая формат name/result."""
+    if isinstance(obj, dict):
+        low = {k.lower(): k for k in obj if isinstance(k, str)}
+        nk = next((low[k] for k in ("name", "title", "key", "label") if k in low), None)
+        vk = next((low[k] for k in ("result", "value", "output") if k in low), None)
+        if nk and vk and isinstance(obj.get(vk), (str, int, float)):
+            v = str(obj[vk]).strip()
+            if v.lower() not in BAD:
+                flat[norm(obj[nk])] = v
+        for k, v in obj.items():
+            if isinstance(v, (str, int, float)):
+                s = str(v).strip()
+                if norm(k) not in flat and s.lower() not in BAD:
+                    flat[norm(k)] = s
+            else:
+                collect(v, flat)
+    elif isinstance(obj, list):
+        for v in obj:
+            collect(v, flat)
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -34,59 +49,48 @@ def webhook():
             "Unknown"
         )
 
-        transcript = msg.get("transcript", "")
-        full = transcript.replace("\n", " ")
-        u = user_text(transcript)
-        brands = "BMW|Porsche|Mercedes|Toyota|Audi|Honda|Ford|Chevrolet|Chevy|Lexus|Nissan|Hyundai|Kia|Volkswagen|VW|Subaru|Mazda|Dodge|Ram|Jeep|GMC|Cadillac|Infiniti|Acura|Volvo|Tesla|Land Rover|Range Rover"
+        flat = {}
+        collect(data, flat)
 
-        # Имя
-        name = "Не указано"
-        m = re.search(r"(?:my name is|i am|i'm|this is|name is|it's|меня зовут)\s+([A-Za-zА-Яа-я]+(?:\s+[A-Za-zА-Яа-я]+)?)", u, re.I)
-        if m:
-            name = m.group(1).strip().title()
+        def pick(*cands):
+            for c in cands:
+                key = norm(c)
+                if key in flat and flat[key].lower() not in BAD:
+                    return flat[key]
+            return None
 
-        # Машина
-        car = "Не указано"
-        m = re.search(r"(\d{4})\s+(" + brands + r")([A-Za-z0-9\- ]{0,18})", full, re.I)
-        if m:
-            car = (m.group(1) + " " + m.group(2) + m.group(3)).strip()
-        else:
-            m = re.search(r"(" + brands + r")([A-Za-z0-9\- ]{0,18})", full, re.I)
-            if m:
-                car = (m.group(1) + m.group(2)).strip()
+        name = pick("customer_name", "customername")
+        car = pick("vehicle_text", "vehicletext")
+        location = pick("location")
+        time_pref = pick("appointment_time", "appointmenttime")
+        problem = pick("problem")
 
         phone = caller if caller and caller != "Unknown" else "Не указано"
 
-        location = "Не указано"
-        if "arlington" in full.lower():
-            location = "Arlington Heights"
-        elif "schaumburg" in full.lower():
-            location = "Schaumburg"
+        # подстраховка для проблемы из транскрипта
+        if not problem:
+            transcript = msg.get("transcript", "")
+            for line in transcript.split("\n"):
+                line = line.strip()
+                if line.lower().startswith("user:"):
+                    t = line.split(":", 1)[1].strip()
+                    if t:
+                        problem = t[:120]
+                        break
 
-        time_pref = "Не указано"
-        m = re.search(r"((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)[A-Za-z0-9 ,:'\.]{0,30}(?:am|pm))", full, re.I)
-        if not m:
-            m = re.search(r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)", full, re.I)
-        if m:
-            time_pref = re.sub(r"\s+", " ", m.group(1)).strip()
-
-        problem = "Не указано"
-        pm = re.search(r"(brake[s]?|engine|transmission|oil|noise|check engine|battery|tire[s]?|suspension|coolant|leak|a/?c|air condition[a-z]*|diagnos[a-z]*|tuning|light[s]?|won'?t start|not starting)[A-Za-z ,]{0,40}", u, re.I)
-        if pm:
-            problem = pm.group(0).strip()
-        elif u:
-            problem = u[:120]
+        def show(v):
+            return v if v else "Не указано"
 
         text = (
             f"🔧 Новая заявка — Auto House UA\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"👤 Имя: {name}\n"
-            f"📱 Телефон: {phone}\n"
-            f"🚗 Авто: {car}\n"
-            f"📍 Локейшн: {location}\n"
-            f"📅 Время: {time_pref}\n"
+            f"👤 Имя: {show(name)}\n"
+            f"📱 Телефон: {show(phone)}\n"
+            f"🚗 Авто: {show(car)}\n"
+            f"📍 Локейшн: {show(location)}\n"
+            f"📅 Время: {show(time_pref)}\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"💬 Проблема: {problem}\n"
+            f"💬 Проблема: {show(problem)}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"📲 CallMind AI"
         )
