@@ -7,15 +7,83 @@ app = Flask(__name__)
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-def user_text(transcript):
+BRANDS = "BMW|Porsche|Mercedes|Toyota|Audi|Honda|Ford|Chevrolet|Chevy|Lexus|Nissan|Hyundai|Kia|Volkswagen|VW|Subaru|Mazda|Dodge|Ram|Jeep|GMC|Cadillac|Infiniti|Acura|Volvo|Tesla|Land Rover|Range Rover"
+WORDNUM = {"one":"1","two":"2","three":"3","four":"4","five":"5","six":"6","seven":"7","eight":"8","nine":"9","ten":"10","eleven":"11","twelve":"12"}
+
+def parse_lines(transcript):
     lines = []
-    for line in transcript.split("\n"):
-        line = line.strip()
-        if line.lower().startswith("user:"):
-            t = line.split(":", 1)[1].strip()
-            if t:
-                lines.append(t)
-    return " ".join(lines)
+    for raw in transcript.split("\n"):
+        raw = raw.strip()
+        if not raw or ":" not in raw:
+            continue
+        role, text = raw.split(":", 1)
+        lines.append((role.strip().lower(), text.strip()))
+    return lines
+
+def next_user_reply(lines, idx):
+    for j in range(idx + 1, len(lines)):
+        role, text = lines[j]
+        if role == "user" and text:
+            return text
+    return None
+
+def find_answer(lines, ai_keywords):
+    for i, (role, text) in enumerate(lines):
+        if role in ("ai", "assistant", "bot") and any(k in text.lower() for k in ai_keywords):
+            reply = next_user_reply(lines, i)
+            if reply:
+                return reply
+    return None
+
+def first_user_reply(lines):
+    for role, text in lines:
+        if role == "user" and text:
+            return text
+    return None
+
+def clean_name(text):
+    if not text:
+        return None
+    m = re.search(r"(?:my name is|this is|it's|i am|i'm|меня зовут)\s+([A-Za-zА-Яа-я]+(?:\s+[A-Za-zА-Яа-я]+)?)", text, re.I)
+    if m:
+        return m.group(1).strip().title()
+    m = re.search(r"^([A-Za-zА-Яа-я]+(?:\s+[A-Za-zА-Яа-я]+)?)", text.strip())
+    if m:
+        return m.group(1).strip().title()
+    return None
+
+def clean_car(text):
+    if not text:
+        return None
+    m = re.search(r"(\d{4})\s*(" + BRANDS + r")([A-Za-z0-9\- ]{0,18})", text, re.I)
+    if m:
+        return (m.group(1) + " " + m.group(2) + m.group(3)).strip()
+    m = re.search(r"(" + BRANDS + r")([A-Za-z0-9\- ]{0,18})", text, re.I)
+    if m:
+        return (m.group(1) + m.group(2)).strip()
+    return text[:60].strip()
+
+def clean_location(text, full):
+    src = (text or "") + " " + full
+    if "arlington" in src.lower():
+        return "Arlington Heights"
+    if "schaumburg" in src.lower():
+        return "Schaumburg"
+    return None
+
+def clean_time(text):
+    if not text:
+        return None
+    t = text
+    for w, d in WORDNUM.items():
+        t = re.sub(rf"\b{w}\b", d, t, flags=re.I)
+    m = re.search(r"((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)[\sA-Za-z0-9,:']{0,30}(?:am|pm))", t, re.I)
+    if m:
+        return re.sub(r"\s+", " ", m.group(1)).strip()
+    m = re.search(r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)", t, re.I)
+    if m:
+        return m.group(1).strip().capitalize()
+    return t[:40].strip()
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -36,49 +104,21 @@ def webhook():
 
         transcript = msg.get("transcript", "")
         full = transcript.replace("\n", " ")
-        u = user_text(transcript)
-        brands = "BMW|Porsche|Mercedes|Toyota|Audi|Honda|Ford|Chevrolet|Chevy|Lexus|Nissan|Hyundai|Kia|Volkswagen|VW|Subaru|Mazda|Dodge|Ram|Jeep|GMC|Cadillac|Infiniti|Acura|Volvo|Tesla|Land Rover|Range Rover"
+        lines = parse_lines(transcript)
 
-        # Имя
-        name = "Не указано"
-        m = re.search(r"(?:my name is|i am|i'm|this is|name is|it's|меня зовут)\s+([A-Za-zА-Яа-я]+(?:\s+[A-Za-zА-Яа-я]+)?)", u, re.I)
-        if m:
-            name = m.group(1).strip().title()
+        name_raw = find_answer(lines, ["name"])
+        car_raw = find_answer(lines, ["year", "make", "model"])
+        location_raw = find_answer(lines, ["schaumburg", "arlington", "location", "convenient"])
+        time_raw = find_answer(lines, ["day", "time works", "time"])
+        problem_raw = first_user_reply(lines)
 
-        # Машина
-        car = "Не указано"
-        m = re.search(r"(\d{4})\s+(" + brands + r")([A-Za-z0-9\- ]{0,18})", full, re.I)
-        if m:
-            car = (m.group(1) + " " + m.group(2) + m.group(3)).strip()
-        else:
-            m = re.search(r"(" + brands + r")([A-Za-z0-9\- ]{0,18})", full, re.I)
-            if m:
-                car = (m.group(1) + m.group(2)).strip()
+        name = clean_name(name_raw) or "Не указано"
+        car = clean_car(car_raw) or "Не указано"
+        location = clean_location(location_raw, full) or "Не указано"
+        time_pref = clean_time(time_raw) or "Не указано"
+        problem = (problem_raw[:150].strip() if problem_raw else None) or "Не указано"
 
         phone = caller if caller and caller != "Unknown" else "Не указано"
-
-        # Локейшн
-        location = "Не указано"
-        if "arlington" in full.lower():
-            location = "Arlington Heights"
-        elif "schaumburg" in full.lower():
-            location = "Schaumburg"
-
-        # Время
-        time_pref = "Не указано"
-        m = re.search(r"((?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)[A-Za-z0-9 ,:'\.]{0,30}(?:am|pm))", full, re.I)
-        if not m:
-            m = re.search(r"(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow)", full, re.I)
-        if m:
-            time_pref = re.sub(r"\s+", " ", m.group(1)).strip()
-
-        # Проблема — только ключевое, коротко
-        problem = "Не указано"
-        pm = re.search(r"(broken light|light[s]?|brake[s]?|engine|transmission|oil change|oil|noise|check engine|battery|tire[s]?|suspension|coolant|leak|a/?c|air condition[a-z]*|diagnos[a-z]*|tuning|won'?t start|not starting)", u, re.I)
-        if pm:
-            problem = pm.group(0).strip().capitalize()
-        elif u:
-            problem = u[:80]
 
         text = (
             f"🔧 Новая заявка — Auto House UA\n"
